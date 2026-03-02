@@ -1,0 +1,93 @@
+{
+  "name": "Workflow 1 — Booking Confirmed → Doctor Notification",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "booking-confirmed",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "name": "Webhook — Booking Received",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "booking-confirmed"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ received: true }) }}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000002",
+      "name": "Respond to Backend",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [480, 180]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.resend.com/emails",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.RESEND_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": []
+        },
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"from\": \"{{ $env.CLINIC_FROM_EMAIL }}\",\n  \"to\": [\"{{ $json.doctor_email }}\"],\n  \"subject\": \"New Appointment: {{ $json.patient_name }} — {{ $json.scheduled_date }} at {{ $json.scheduled_time }}\",\n  \"html\": \"<div style='font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 30px;'><div style='background: #1e40af; color: white; padding: 20px; border-radius: 8px 8px 0 0;'><h2 style='margin:0'>New Appointment Booked</h2></div><div style='border: 1px solid #e2e8f0; border-top: none; padding: 25px; border-radius: 0 0 8px 8px;'><p>Dear {{ $json.doctor_name }},</p><p>A new appointment has been confirmed.</p><table style='width:100%; border-collapse: collapse; margin: 20px 0;'><tr style='background: #f8fafc;'><td style='padding: 10px; border: 1px solid #e2e8f0; font-weight: bold;'>Patient</td><td style='padding: 10px; border: 1px solid #e2e8f0;'>{{ $json.patient_name }}</td></tr><tr><td style='padding: 10px; border: 1px solid #e2e8f0; font-weight: bold;'>Date</td><td style='padding: 10px; border: 1px solid #e2e8f0;'>{{ $json.scheduled_date }}</td></tr><tr style='background: #f8fafc;'><td style='padding: 10px; border: 1px solid #e2e8f0; font-weight: bold;'>Time</td><td style='padding: 10px; border: 1px solid #e2e8f0;'>{{ $json.scheduled_time }}</td></tr><tr><td style='padding: 10px; border: 1px solid #e2e8f0; font-weight: bold;'>Reason</td><td style='padding: 10px; border: 1px solid #e2e8f0;'>{{ $json.reason || 'Not specified' }}</td></tr></table><p style='color: #6b7280; font-size: 13px;'>The patient will complete an AI pre-visit check-in before the appointment. You will receive another notification when their intake is complete.</p></div></div>\"\n}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000003",
+      "name": "Email Doctor — New Appointment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 420]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook — Booking Received": {
+      "main": [
+        [
+          {
+            "node": "Respond to Backend",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email Doctor — New Appointment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "workflow-001-booking-notification",
+  "tags": [
+    { "name": "healthcare" },
+    { "name": "notifications" }
+  ]
+}

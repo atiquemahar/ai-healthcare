@@ -1,0 +1,152 @@
+{
+  "name": "Workflow 2 — Intake Complete → Alert Doctor",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "intake-complete",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0002-0002-0002-000000000001",
+      "name": "Webhook — Intake Received",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "intake-complete"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ received: true }) }}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0002-0002-0002-000000000002",
+      "name": "Respond to Backend",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [480, 160]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.risk_level }}",
+              "operation": "equals",
+              "value2": "high"
+            }
+          ]
+        }
+      },
+      "id": "a1b2c3d4-0002-0002-0002-000000000003",
+      "name": "Is High Risk?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [480, 420]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.resend.com/emails",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.RESEND_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"from\": \"{{ $env.CLINIC_FROM_EMAIL }}\",\n  \"to\": [\"{{ $json.doctor_email }}\"],\n  \"subject\": \"🚨 URGENT — High Risk Intake: {{ $json.patient_name }} at {{ $json.scheduled_time }}\",\n  \"html\": \"<div style='font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 30px;'><div style='background: #dc2626; color: white; padding: 20px; border-radius: 8px 8px 0 0;'><h2 style='margin:0'>🚨 High Risk Patient — Immediate Attention</h2></div><div style='border: 2px solid #dc2626; border-top: none; padding: 25px; border-radius: 0 0 8px 8px;'><p>Dear {{ $json.doctor_name }},</p><p><strong>{{ $json.patient_name }}</strong> has completed their pre-visit intake and has been flagged as HIGH RISK.</p><div style='background: #fef2f2; border: 1px solid #fca5a5; padding: 15px; border-radius: 6px; margin: 20px 0;'><p style='margin:0; color: #991b1b; font-weight: bold;'>Risk Level: HIGH ⚠️</p><p style='margin: 10px 0 0 0; color: #374151;'>{{ $json.ai_summary }}</p></div><p>Appointment time: <strong>{{ $json.scheduled_time }}</strong></p><p>Please review the full intake in your dashboard before the appointment.</p></div></div>\"\n}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0002-0002-0002-000000000004",
+      "name": "Email Doctor — HIGH RISK Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.resend.com/emails",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.RESEND_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"from\": \"{{ $env.CLINIC_FROM_EMAIL }}\",\n  \"to\": [\"{{ $json.doctor_email }}\"],\n  \"subject\": \"Intake Ready: {{ $json.patient_name }} — {{ $json.scheduled_time }}\",\n  \"html\": \"<div style='font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 30px;'><div style='background: #059669; color: white; padding: 20px; border-radius: 8px 8px 0 0;'><h2 style='margin:0'>✅ Pre-Visit Intake Complete</h2></div><div style='border: 1px solid #e2e8f0; border-top: none; padding: 25px; border-radius: 0 0 8px 8px;'><p>Dear {{ $json.doctor_name }},</p><p><strong>{{ $json.patient_name }}</strong> has completed their pre-visit check-in.</p><div style='background: #f0fdf4; border: 1px solid #86efac; padding: 15px; border-radius: 6px; margin: 20px 0;'><p style='margin:0; color: #166534; font-weight: bold;'>Risk Level: {{ $json.risk_level | upper }}</p><p style='margin: 10px 0 0 0; color: #374151;'>{{ $json.ai_summary }}</p></div><p>Appointment time: <strong>{{ $json.scheduled_time }}</strong></p><p style='color: #6b7280; font-size: 13px;'>Review the full summary in your dashboard.</p></div></div>\"\n}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0002-0002-0002-000000000005",
+      "name": "Email Doctor — Normal Intake Ready",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 540]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook — Intake Received": {
+      "main": [
+        [
+          {
+            "node": "Respond to Backend",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Is High Risk?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is High Risk?": {
+      "main": [
+        [
+          {
+            "node": "Email Doctor — HIGH RISK Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Email Doctor — Normal Intake Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "workflow-002-intake-alert",
+  "tags": [
+    { "name": "healthcare" },
+    { "name": "notifications" }
+  ]
+}

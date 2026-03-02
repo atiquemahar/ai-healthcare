@@ -1,0 +1,185 @@
+{
+  "name": "Workflow 4 — Daily 8AM → Intake Reminders for Tomorrow's Patients",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "a1b2c3d4-0004-0004-0004-000000000001",
+      "name": "Cron — 8AM Every Day",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.BACKEND_API_URL }}/api/internal/reminders/intake-due",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-internal-secret",
+              "value": "={{ $env.N8N_INTERNAL_SECRET }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0004-0004-0004-000000000002",
+      "name": "Fetch Tomorrow's Pending Intakes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.count }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "a1b2c3d4-0004-0004-0004-000000000003",
+      "name": "Any Patients Need Reminder?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "reminders",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0004-0004-0004-000000000004",
+      "name": "Split Into Individual Patients",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [960, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.resend.com/emails",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.RESEND_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"from\": \"{{ $env.CLINIC_FROM_EMAIL }}\",\n  \"to\": [\"{{ $json.patient_email }}\"],\n  \"subject\": \"Complete Your Pre-Visit Check-in — Tomorrow at {{ $json.scheduled_time }}\",\n  \"html\": \"<div style='font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 30px;'><div style='background: #d97706; color: white; padding: 20px; border-radius: 8px 8px 0 0;'><h2 style='margin:0'>⏰ Action Required — Pre-Visit Check-in</h2></div><div style='border: 1px solid #e2e8f0; border-top: none; padding: 25px; border-radius: 0 0 8px 8px;'><p>Dear {{ $json.patient_name }},</p><p>You have an appointment <strong>tomorrow</strong> and your pre-visit check-in is not yet complete.</p><div style='background: #fffbeb; border: 1px solid #fcd34d; padding: 15px; border-radius: 6px; margin: 20px 0;'><p style='margin:0'><strong>Doctor:</strong> {{ $json.doctor_name }}</p><p style='margin: 8px 0 0 0'><strong>Date:</strong> {{ $json.scheduled_date }}</p><p style='margin: 8px 0 0 0'><strong>Time:</strong> {{ $json.scheduled_time }}</p></div><p>Please complete your check-in so your doctor can prepare for your visit. It only takes 3-5 minutes.</p><a href='{{ $json.intake_url }}' style='display: inline-block; background: #d97706; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;'>Complete Pre-Visit Check-in →</a><p style='color: #9ca3af; font-size: 12px; margin-top: 20px;'>If you have already completed your check-in, please ignore this email.</p></div></div>\"\n}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0004-0004-0004-000000000005",
+      "name": "Email Each Patient — Intake Reminder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 200]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "log",
+              "name": "log",
+              "value": "=No appointments needing intake reminders for {{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0004-0004-0004-000000000006",
+      "name": "Log — No Reminders Needed",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [960, 420]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Cron — 8AM Every Day": {
+      "main": [
+        [
+          {
+            "node": "Fetch Tomorrow's Pending Intakes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Tomorrow's Pending Intakes": {
+      "main": [
+        [
+          {
+            "node": "Any Patients Need Reminder?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Patients Need Reminder?": {
+      "main": [
+        [
+          {
+            "node": "Split Into Individual Patients",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log — No Reminders Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Into Individual Patients": {
+      "main": [
+        [
+          {
+            "node": "Email Each Patient — Intake Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "workflow-004-daily-intake-reminder",
+  "tags": [
+    { "name": "healthcare" },
+    { "name": "scheduled" }
+  ]
+}
