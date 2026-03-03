@@ -1,5 +1,30 @@
 # Implementation Guide — Local Setup & Testing
 
+## Current System Status ✅
+
+**COMPLETED:**
+- ✅ Backend API fully functional (auth, appointments, intake, doctor dashboard)
+- ✅ Patient frontend: Login, Register, Dashboard, Book Appointment, Prescriptions
+- ✅ Doctor frontend: Login, Dashboard, Encounter, Patient History  
+- ✅ JWT authentication (fixed JWT subject claim per RFC 7519)
+- ✅ Database auto-creation on startup
+- ✅ CORS middleware configured
+- ✅ End-to-end patient flow tested (register → book → intake session)
+
+**READY FOR API KEY:**
+- ⏳ Anthropic Claude integration (awaiting API key in .env)
+- ⏳ N8N webhook automation (endpoints configured)
+- ⏳ PDF generation via WeasyPrint
+
+**KEY FIX APPLIED:**
+JWT "sub" claim in auth.py was an integer but JWT spec (RFC 7519) requires string. Fixed in `backend/routers/auth.py` line ~35:
+```python
+payload["sub"] = str(payload["sub"])  # Convert ID to string before encoding
+```
+This resolved all 401 Unauthorized errors on login validation.
+
+---
+
 ## Before You Start — Get These Accounts (30 minutes)
 
 | Service | URL | Who Needs It | What To Get |
@@ -321,6 +346,29 @@ npx n8n
 ---
 
 ## Common Errors & Fixes
+
+### 401 Unauthorized on Login
+**Problem:** Login succeeds but subsequent API calls return 401.
+
+**Root Cause:** JWT "sub" claim was encoded as integer instead of string. JWT spec (RFC 7519) requires it to be a string.
+
+**Fix:** Ensure `backend/routers/auth.py` has this in the `create_token()` function (around line 35):
+```python
+payload["sub"] = str(payload["sub"])  # ← Convert to string before encoding
+```
+
+**Test it:**
+```bash
+# Login and capture the token
+curl -X POST http://localhost:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"doctor@example.com","password":"doctor123"}'
+
+# Use the token in the response
+curl http://localhost:8000/api/auth/me \
+  -H "Authorization: Bearer YOUR_TOKEN_HERE"
+# Should return 200 with user info (not 401)
+```
 
 ### Backend won't start
 ```
