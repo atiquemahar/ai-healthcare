@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Healthcare Platform</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="debug-auth" style="position:fixed;right:12px;bottom:12px;background:#111;color:#fff;padding:8px;border-radius:6px;font-family:monospace;font-size:12px;opacity:0.9;z-index:9999"></div>
+    <script>
+      (function(){
+        try {
+          const token = localStorage.getItem('token') || '(none)'
+          const role = localStorage.getItem('role') || '(none)'
+          const el = document.getElementById('debug-auth')
+          el.textContent = `token: ${token.slice(0,20)}${token.length>20?"...":""} | role: ${role}`
+        } catch(e) {
+          // ignore
+        }
+      })()
+    </script>
+    <script>
+      // Show runtime errors in the debug overlay and root
+      (function(){
+        const show = (msg) => {
+          try {
+            const el = document.getElementById('debug-auth')
+            if (el) el.textContent = msg
+            const root = document.getElementById('root')
+            if (root) root.innerHTML = `<div style="font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;padding:24px;color:#b91c1c"><h2>Runtime error</h2><pre style="white-space:pre-wrap;color:#111">${msg}</pre></div>`
+          } catch(e){}
+        }
+
+        window.addEventListener('error', function(e){
+          show(e.message + ' at ' + (e.filename || '') + ':' + (e.lineno || '') )
+          console.error(e.error || e.message)
+        })
+
+        window.addEventListener('unhandledrejection', function(e){
+          const reason = e.reason ? (e.reason.message || JSON.stringify(e.reason)) : 'unhandled rejection'
+          show('UnhandledRejection: ' + reason)
+          console.error(e.reason)
+        })
+      })()
+    </script>
+    <script>
+      // Fallback: if React hasn't mounted into #root after 800ms, show a static message.
+      setTimeout(() => {
+        try {
+          const root = document.getElementById('root')
+          if (root && root.children.length === 0) {
+            root.innerHTML = '<div style="font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;display:flex;align-items:center;justify-content:center;height:100vh;color:#333"><div><h2>Static fallback — React may have failed to mount</h2><p style="opacity:0.8">Check browser console or the dev server logs.</p></div></div>'
+          }
+        } catch (e) {}
+      }, 800)
+    </script>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

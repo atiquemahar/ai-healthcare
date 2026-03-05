@@ -31,7 +31,7 @@ PDF prescription generated + emailed to patient
 | Frontend | React + Tailwind CSS | Vercel | Free |
 | Backend | Python + FastAPI | Railway | $5/mo |
 | Database | PostgreSQL | Neon | Free |
-| AI | Claude API (Anthropic) | API | Pay per use |
+| AI | OpenAI API (GPT-4 Turbo) | API | Pay per use |
 | Automation | N8N | Self-hosted on Railway | Free |
 | Email | Resend | Resend.com | Free (100/day) |
 | PDF | WeasyPrint (Python) | Same as backend | Free |
@@ -59,7 +59,7 @@ ai-healthcare/
 ├── backend/
 │   ├── main.py                  # FastAPI app entry point
 │   ├── database.py              # DB connection + session
-│   ├── models.py                # All 7 database table models
+│   ├── models.py                # All database table models (patients, doctors, availability, appointments, intake, encounters, prescriptions)
 │   ├── schemas.py               # Pydantic request/response schemas
 │   ├── requirements.txt         # Python dependencies
 │   ├── .env.example             # Environment variables template
@@ -96,18 +96,6 @@ ai-healthcare/
 │   │   │       ├── Dashboard.jsx
 │   │   │       ├── Encounter.jsx
 │   │   │       └── PatientHistory.jsx
-│   │   └── components/
-│   │       ├── patient/
-│   │       │   ├── BookingForm.jsx     # Step 1
-│   │       │   ├── BookingConfirmed.jsx # Step 2 (with polling)
-│   │       │   └── IntakeChat.jsx      # Step 3 (chat UI)
-│   │       ├── doctor/
-│   │       │   ├── IntakeSummary.jsx
-│   │       │   ├── PrescriptionForm.jsx
-│   │       │   └── PatientTimeline.jsx
-│   │       └── shared/
-│   │           ├── Navbar.jsx
-│   │           └── ProtectedRoute.jsx
 │   ├── package.json
 │   ├── tailwind.config.js
 │   └── .env.example
@@ -202,7 +190,7 @@ Tables are created automatically when you first run the backend.
 
 | Key | Where to Get | Who Needs It |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | console.anthropic.com | Member C |
+| `OPENAI_API_KEY` | platform.openai.com | Member C |
 | `DATABASE_URL` | neon.tech | Member B |
 | `RESEND_API_KEY` | resend.com | Member C |
 | `N8N_WEBHOOK_URL` | Your N8N instance | Member C |
@@ -245,10 +233,11 @@ update/ai-prompt-v2         ← updating existing thing
 ```env
 DATABASE_URL=postgresql://user:password@host/dbname
 SECRET_KEY=your-random-secret-key-at-least-32-chars
-ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...
 RESEND_API_KEY=re_...
 N8N_WEBHOOK_BOOKING=https://your-n8n.com/webhook/booking
 FRONTEND_URL=http://localhost:5173
+BACKEND_URL=http://localhost:8000
 ```
 
 ### Frontend `.env`
@@ -258,11 +247,12 @@ VITE_API_URL=http://localhost:8000
 
 ---
 
-## Database Tables (7 total)
+## Database Tables
 
 ```
 patients              → registered patients
 doctors               → registered doctors (added manually for MVP)
+doctor_availability   → weekly recurring availability per doctor
 appointments          → booked appointments
 intake_sessions       → AI chat sessions (one per appointment)
 conversation_messages → every message in every chat
@@ -272,7 +262,7 @@ prescriptions         → final prescription + PDF link
 
 ---
 
-## API Endpoints (16 total)
+## API Endpoints (high level)
 
 ```
 Auth (4 endpoints)

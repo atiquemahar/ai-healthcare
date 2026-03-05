@@ -16,12 +16,17 @@ export default function BookAppointment() {
   const [step, setStep]                   = useState(STEP.BOOKING_FORM)
   const [doctors, setDoctors]             = useState([])
   const [form, setForm]                   = useState({ doctor_id: '', scheduled_date: '', scheduled_time: '', reason: '' })
+  const [availableSlots, setAvailableSlots] = useState([])
+  const [slotsLoading, setSlotsLoading]   = useState(false)
+  const [slotsError, setSlotsError]       = useState('')
   const [error, setError]                 = useState('')
   const [appointment, setAppointment]     = useState(null)
   const [session, setSession]             = useState(null)
   const [messages, setMessages]           = useState([])
   const [inputText, setInputText]         = useState('')
   const [aiTyping, setAiTyping]           = useState(false)
+  const [currentApptId, setCurrentApptId] = useState(null)  // Track current booking
+  const [initRetries, setInitRetries]     = useState(0)    // Retry counter for intake init
   const chatBottomRef = useRef(null)
 
   // Load doctors on mount
@@ -30,6 +35,36 @@ export default function BookAppointment() {
       .then(res => setDoctors(res.data))
       .catch(() => setError('Failed to load doctors'))
   }, [])
+
+  // Load available slots whenever doctor & date are selected
+  useEffect(() => {
+    const { doctor_id, scheduled_date } = form
+    if (!doctor_id || !scheduled_date) {
+      setAvailableSlots([])
+      setSlotsError('')
+      return
+    }
+
+    const loadSlots = async () => {
+      setSlotsLoading(true)
+      setSlotsError('')
+      try {
+        const res = await appointmentAPI.availableSlots(doctor_id, scheduled_date)
+        setAvailableSlots(res.data.slots || [])
+        // If the currently selected time is no longer valid, reset it
+        if (form.scheduled_time && !res.data.slots?.includes(form.scheduled_time)) {
+          setForm(f => ({ ...f, scheduled_time: '' }))
+        }
+      } catch (err) {
+        setAvailableSlots([])
+        setSlotsError(err.response?.data?.detail || 'Failed to load available times')
+      } finally {
+        setSlotsLoading(false)
+      }
+    }
+
+    loadSlots()
+  }, [form.doctor_id, form.scheduled_date])
 
   // Auto-scroll chat to bottom
   useEffect(() => {
@@ -42,6 +77,7 @@ export default function BookAppointment() {
     e.preventDefault()
     setError('')
     setStep(STEP.CONFIRMING)
+    setInitRetries(0)
 
     try {
       // Book appointment — returns immediately with appointment in DB
@@ -54,6 +90,7 @@ export default function BookAppointment() {
       })
 
       const apptId = res.data.id
+      setCurrentApptId(apptId)  // Track this booking
       setAppointment(res.data)
 
       // Poll until confirmed (Option B)
@@ -62,6 +99,7 @@ export default function BookAppointment() {
     } catch (err) {
       setError(err.response?.data?.detail || 'Booking failed. Please try again.')
       setStep(STEP.BOOKING_FORM)
+      setCurrentApptId(null)
     }
   }
 
@@ -79,7 +117,9 @@ export default function BookAppointment() {
           setTimeout(() => initChat(appointmentId), 2000)
           return
         }
-      } catch {}
+      } catch (err) {
+        console.error('Status check error:', err.message)
+      }
     }
     // After 15 seconds, proceed anyway (appointment was created)
     setStep(STEP.CONFIRMED)
@@ -89,25 +129,75 @@ export default function BookAppointment() {
   // ─── Start chat session ───────────────────────────────────────────────────
 
   const initChat = async (appointmentId) => {
-    try {
-      const sessionRes = await intakeAPI.startSession({ appointment_id: appointmentId })
-      const newSession = sessionRes.data
-      setSession(newSession)
-      setStep(STEP.CHAT)
-
-      // Load context then get opening AI message
-      await intakeAPI.getContext(newSession.id)
-
-      // Send an empty "start" message to get Claude's greeting
-      setAiTyping(true)
-      const msgRes = await intakeAPI.sendMessage(newSession.id, '__start__')
-      setMessages([{ role: 'ai', content: msgRes.data.ai_response }])
-      setAiTyping(false)
-
-    } catch (err) {
-      setError('Failed to start intake. Please try again.')
-      setStep(STEP.CONFIRMED)
+    // Ignore if this is not the current booking
+    if (currentApptId !== appointmentId) {
+      console.log('Ignoring stale chat init for appointment:', appointmentId)
+      return
     }
+
+    const MAX_RETRIES = 3
+    let lastError = null
+
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        // Create intake session
+        const sessionRes = await intakeAPI.startSession({ appointment_id: appointmentId })
+        const newSession = sessionRes.data
+        
+        // Double-check this is still the current booking
+        if (currentApptId !== appointmentId) {
+          console.log('Booking changed during intake init, aborting')
+          return
+        }
+
+        setSession(newSession)
+        setStep(STEP.CHAT)
+
+        // Load context (may fail but don't block on it)
+        try {
+          await intakeAPI.getContext(newSession.id)
+        } catch (contextErr) {
+          console.warn('Context load failed (non-blocking):', contextErr.message)
+        }
+
+        // Send an empty "start" message to get Claude's greeting
+        setAiTyping(true)
+        const msgRes = await intakeAPI.sendMessage(newSession.id, '__start__')
+        setMessages([{ role: 'ai', content: msgRes.data.ai_response }])
+        setAiTyping(false)
+        
+        // Success! Clear retry counter
+        setInitRetries(0)
+        return
+
+      } catch (err) {
+        lastError = err
+        const statusCode = err.response?.status
+        const detail = err.response?.data?.detail
+        
+        console.error(`Intake init attempt ${attempt + 1}/${MAX_RETRIES} failed:`, detail || err.message)
+
+        // Don't retry on 404 (appointment not found) or 400 (bad request)
+        if (statusCode === 404 || statusCode === 400) {
+          setError(`Failed to initialize intake: ${detail || err.message}`)
+          setStep(STEP.CONFIRMED)
+          setCurrentApptId(null)
+          return
+        }
+
+        // For transient errors (5xx), retry with backoff
+        if (attempt < MAX_RETRIES - 1) {
+          const backoffMs = (attempt + 1) * 1500  // 1.5s, 3s, 4.5s
+          console.log(`Retrying in ${backoffMs}ms...`)
+          await sleep(backoffMs)
+        }
+      }
+    }
+
+    // All retries exhausted
+    setError(`Failed to start intake after ${MAX_RETRIES} attempts. Please refresh and try again.`)
+    setStep(STEP.CONFIRMED)
+    setCurrentApptId(null)
   }
 
   // ─── Send patient message ─────────────────────────────────────────────────
@@ -140,7 +230,19 @@ export default function BookAppointment() {
       setError('Failed to complete intake. Your chat has been saved.')
     }
   }
+  // ─── Book another appointment ───────────────────────────────────────────
 
+  const handleBookAnother = () => {
+    // Reset form for another booking
+    setForm({ doctor_id: '', scheduled_date: '', scheduled_time: '', reason: '' })
+    setStep(STEP.BOOKING_FORM)
+    setAppointment(null)
+    setSession(null)
+    setMessages([])
+    setError('')
+    setCurrentApptId(null)
+    setInitRetries(0)
+  }
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -209,31 +311,42 @@ export default function BookAppointment() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
                   <input
                     type="date"
                     required
                     min={new Date().toISOString().split('T')[0]}
                     value={form.scheduled_date}
-                    onChange={e => setForm(f => ({ ...f, scheduled_date: e.target.value }))}
+                  onChange={e => setForm(f => ({ ...f, scheduled_date: e.target.value }))}
                     className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Time</label>
-                  <select
-                    required
-                    value={form.scheduled_time}
-                    onChange={e => setForm(f => ({ ...f, scheduled_time: e.target.value }))}
-                    className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                  >
-                    <option value="">Select time...</option>
-                    {['09:00','09:30','10:00','10:30','11:00','11:30',
-                      '14:00','14:30','15:00','15:30','16:00','16:30'].map(t => (
-                      <option key={t} value={t}>{t}</option>
-                    ))}
-                  </select>
-                </div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Time</label>
+                <select
+                  required
+                  disabled={!form.doctor_id || !form.scheduled_date || slotsLoading || availableSlots.length === 0}
+                  value={form.scheduled_time}
+                  onChange={e => setForm(f => ({ ...f, scheduled_time: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-50 disabled:text-gray-400"
+                >
+                  <option value="">
+                    {!form.doctor_id || !form.scheduled_date
+                      ? 'Select doctor and date first'
+                      : slotsLoading
+                        ? 'Loading available times...'
+                        : availableSlots.length === 0
+                          ? 'No available times'
+                          : 'Select time...'}
+                  </option>
+                  {availableSlots.map(t => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+                {slotsError && (
+                  <p className="mt-1 text-xs text-red-600">{slotsError}</p>
+                )}
+              </div>
               </div>
 
               <div>
@@ -369,16 +482,24 @@ export default function BookAppointment() {
               <span className="text-3xl">🎉</span>
             </div>
             <h2 className="text-xl font-semibold text-gray-800 mb-2">Check-in Complete!</h2>
-            <p className="text-gray-600 text-sm mb-4">
+            <p className="text-gray-600 text-sm mb-6">
               Your doctor will review your answers before the appointment.
               You don't need to do anything else right now.
             </p>
-            <a
-              href="/dashboard"
-              className="inline-block bg-blue-600 text-white rounded-lg px-6 py-2.5 font-medium hover:bg-blue-700 transition-colors text-sm"
-            >
-              Back to Dashboard
-            </a>
+            <div className="flex gap-3 justify-center flex-wrap">
+              <button
+                onClick={handleBookAnother}
+                className="bg-blue-600 text-white rounded-lg px-6 py-2.5 font-medium hover:bg-blue-700 transition-colors text-sm"
+              >
+                + Book Another
+              </button>
+              <a
+                href="/dashboard"
+                className="inline-block bg-gray-100 text-gray-700 rounded-lg px-6 py-2.5 font-medium hover:bg-gray-200 transition-colors text-sm border border-gray-300"
+              >
+                Back to Dashboard
+              </a>
+            </div>
           </div>
         )}
 

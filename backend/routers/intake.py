@@ -30,6 +30,7 @@ def start_intake_session(
     """
     Called when patient clicks 'Start Chat' after booking confirmed.
     Creates the intake session and returns session_id.
+    Handles concurrent requests gracefully by returning existing session.
     """
     # Verify appointment belongs to this patient
     appointment = db.query(Appointment).filter(
@@ -40,26 +41,44 @@ def start_intake_session(
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
 
-    # Check if session already exists (patient refreshed page)
+    # Check if session already exists (patient refreshed page or concurrent request)
     existing = db.query(IntakeSession).filter(
         IntakeSession.appointment_id == data.appointment_id
     ).first()
 
     if existing:
-        return existing  # Resume existing session
+        return existing  # Resume existing session (handles race condition)
 
     # Create new session
-    session = IntakeSession(
-        appointment_id = data.appointment_id,
-        patient_id     = current_patient.id,
-        doctor_id      = appointment.doctor_id,
-        status         = IntakeStatus.in_progress,
-    )
-    db.add(session)
-    db.commit()
-    db.refresh(session)
-
-    return session
+    try:
+        session = IntakeSession(
+            appointment_id = data.appointment_id,
+            patient_id     = current_patient.id,
+            doctor_id      = appointment.doctor_id,
+            status         = IntakeStatus.in_progress,
+        )
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+        return session
+    except Exception as e:
+        # Handle race condition: another request created the session concurrently
+        db.rollback()
+        
+        # Try to fetch the existing session
+        existing = db.query(IntakeSession).filter(
+            IntakeSession.appointment_id == data.appointment_id
+        ).first()
+        
+        if existing:
+            return existing
+        
+        # If still not found, it's a different error
+        print(f"Intake session creation error: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail="Failed to create intake session. Please try again in a moment."
+        )
 
 
 # ─── Get patient history context (loaded before chat starts) ──────────────────

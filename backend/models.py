@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Integer, String, DateTime, Boolean,
-    ForeignKey, Text, JSON, Enum, Date
+    ForeignKey, Text, JSON, Enum, Date, Time
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -95,7 +95,24 @@ class Doctor(Base):
         return f"Dr. {self.first_name} {self.last_name}"
 
 
-# ─── Table 3: Appointments ───────────────────────────────────────────────────
+# ─── Table 3: Doctor Availability ─────────────────────────────────────────────
+
+class DoctorAvailability(Base):
+    """
+    Weekly recurring availability blocks for each doctor.
+    day_of_week: 0 = Monday ... 6 = Sunday
+    start_time / end_time: working hours for that day.
+    """
+    __tablename__ = "doctor_availability"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    doctor_id   = Column(Integer, ForeignKey("doctors.id"), nullable=False, index=True)
+    day_of_week = Column(Integer, nullable=False)  # 0-6 (Mon-Sun)
+    start_time  = Column(Time, nullable=False)
+    end_time    = Column(Time, nullable=False)
+
+
+# ─── Table 4: Appointments ───────────────────────────────────────────────────
 
 class Appointment(Base):
     __tablename__ = "appointments"
@@ -119,7 +136,7 @@ class Appointment(Base):
     encounter       = relationship("Encounter", back_populates="appointment", uselist=False)
 
 
-# ─── Table 4: Intake Sessions ────────────────────────────────────────────────
+# ─── Table 5: Intake Sessions ────────────────────────────────────────────────
 
 class IntakeSession(Base):
     __tablename__ = "intake_sessions"
@@ -155,7 +172,7 @@ class IntakeSession(Base):
                                order_by="ConversationMessage.message_number")
 
 
-# ─── Table 5: Conversation Messages ──────────────────────────────────────────
+# ─── Table 6: Conversation Messages ──────────────────────────────────────────
 
 class ConversationMessage(Base):
     __tablename__ = "conversation_messages"
@@ -171,7 +188,7 @@ class ConversationMessage(Base):
     session = relationship("IntakeSession", back_populates="messages")
 
 
-# ─── Table 6: Encounters ─────────────────────────────────────────────────────
+# ─── Table 7: Encounters ─────────────────────────────────────────────────────
 
 class Encounter(Base):
     __tablename__ = "encounters"
@@ -198,7 +215,7 @@ class Encounter(Base):
     prescription = relationship("Prescription", back_populates="encounter", uselist=False)
 
 
-# ─── Table 7: Prescriptions ──────────────────────────────────────────────────
+# ─── Table 8: Prescriptions ──────────────────────────────────────────────────
 
 class Prescription(Base):
     __tablename__ = "prescriptions"

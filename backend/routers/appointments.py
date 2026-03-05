@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from datetime import datetime, time, timedelta, date as date_type
 import httpx
 import os
 
 from database import get_db
-from models import Appointment, Doctor, AppointmentStatus
+from models import Appointment, Doctor, AppointmentStatus, DoctorAvailability
 from schemas import AppointmentCreate, AppointmentResponse
 from routers.auth import require_patient
 
@@ -30,6 +31,89 @@ def list_doctors(db: Session = Depends(get_db)):
     ]
 
 
+# ─── Helper: compute available 30-minute slots ────────────────────────────────
+
+def _generate_slots_for_availability(avail, target_date: date_type, existing_appointments):
+    """
+    Given a DoctorAvailability row, a date, and existing appointments,
+    return all free 30-minute slot strings ("HH:MM") within that window.
+    """
+    # Build naive datetimes for start/end on the target date
+    start_dt = datetime.combine(target_date, avail.start_time)
+    end_dt = datetime.combine(target_date, avail.end_time)
+
+    slot_length = timedelta(minutes=30)
+    slots = []
+
+    # Pre-build a set of taken times ("HH:MM") for quick lookup
+    taken_times = {
+        appt.scheduled_time
+        for appt in existing_appointments
+    }
+
+    current = start_dt
+    # Only create slots where the full 30 minutes fit before end_dt
+    while current + slot_length <= end_dt:
+        slot_str = current.strftime("%H:%M")
+        if slot_str not in taken_times:
+            slots.append(slot_str)
+        current += slot_length
+
+    return slots
+
+
+@router.get("/doctors/{doctor_id}/available-slots")
+def get_available_slots(
+    doctor_id: int,
+    date: str = Query(..., description="Date in YYYY-MM-DD"),
+    db: Session = Depends(get_db),
+):
+    """
+    Returns available 30-minute time slots for a doctor on a given date,
+    based on their weekly availability and existing non-cancelled appointments.
+    """
+    # Verify doctor exists and is active
+    doctor = db.query(Doctor).filter(Doctor.id == doctor_id, Doctor.is_active == True).first()
+    if not doctor:
+        raise HTTPException(status_code=404, detail="Doctor not found")
+
+    try:
+        target_date = date_type.fromisoformat(date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    day_of_week = target_date.weekday()  # Monday=0
+
+    # Get availability blocks for this weekday
+    availability_blocks = db.query(DoctorAvailability).filter(
+        DoctorAvailability.doctor_id == doctor_id,
+        DoctorAvailability.day_of_week == day_of_week,
+    ).all()
+
+    if not availability_blocks:
+        return {"date": date, "doctor_id": doctor_id, "slots": []}
+
+    # Get existing appointments for that date (non-cancelled)
+    existing_appts = db.query(Appointment).filter(
+        Appointment.doctor_id == doctor_id,
+        Appointment.scheduled_date == target_date,
+        Appointment.status != AppointmentStatus.cancelled,
+    ).all()
+
+    all_slots = []
+    for avail in availability_blocks:
+        all_slots.extend(_generate_slots_for_availability(avail, target_date, existing_appts))
+
+    # Sort slots just in case
+    all_slots = sorted(set(all_slots))
+
+    return {
+        "date": date,
+        "doctor_id": doctor_id,
+        "slots": all_slots,
+    }
+
+
 # ─── Book appointment ─────────────────────────────────────────────────────────
 
 @router.post("/appointments", response_model=AppointmentResponse)
@@ -44,9 +128,57 @@ async def book_appointment(
     Returns the appointment_id which frontend uses to open the chat.
     """
     # Verify doctor exists
-    doctor = db.query(Doctor).filter(Doctor.id == data.doctor_id).first()
+    doctor = db.query(Doctor).filter(Doctor.id == data.doctor_id, Doctor.is_active == True).first()
     if not doctor:
         raise HTTPException(status_code=404, detail="Doctor not found")
+
+    # Enforce availability window (doctor must have availability for this day/time)
+    if not data.scheduled_date:
+        raise HTTPException(status_code=400, detail="scheduled_date is required")
+    if not data.scheduled_time:
+        raise HTTPException(status_code=400, detail="scheduled_time is required")
+
+    # Parse date and time
+    try:
+        target_date = data.scheduled_date
+        appt_time = datetime.strptime(data.scheduled_time, "%H:%M").time()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="scheduled_time must be in HH:MM format")
+
+    day_of_week = target_date.weekday()
+
+    availability_blocks = db.query(DoctorAvailability).filter(
+        DoctorAvailability.doctor_id == data.doctor_id,
+        DoctorAvailability.day_of_week == day_of_week,
+    ).all()
+
+    if not availability_blocks:
+        raise HTTPException(
+            status_code=400,
+            detail="Doctor is not available on this day.",
+        )
+
+    # Ensure requested time falls within at least one availability block
+    in_window = any(avail.start_time <= appt_time < avail.end_time for avail in availability_blocks)
+    if not in_window:
+        raise HTTPException(
+            status_code=400,
+            detail="Selected time is outside the doctor's working hours.",
+        )
+
+    # Check if this time slot is already booked
+    slot_taken = db.query(Appointment).filter(
+        Appointment.doctor_id      == data.doctor_id,
+        Appointment.scheduled_date == data.scheduled_date,
+        Appointment.scheduled_time == data.scheduled_time,
+        Appointment.status         != AppointmentStatus.cancelled,
+    ).first()
+
+    if slot_taken:
+        raise HTTPException(
+            status_code=400, 
+            detail="This time slot is already booked. Please choose another time."
+        )
 
     # Create appointment
     appointment = Appointment(

@@ -178,7 +178,7 @@ def start_encounter(
 # ─── Complete Encounter + Generate Prescription ───────────────────────────────
 
 @router.post("/encounters/{encounter_id}/complete")
-def complete_encounter(
+async def complete_encounter(
     encounter_id: int,
     data: EncounterComplete,
     current_doctor=Depends(require_doctor),

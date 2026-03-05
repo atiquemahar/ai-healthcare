@@ -12,7 +12,7 @@
 - ✅ End-to-end patient flow tested (register → book → intake session)
 
 **READY FOR API KEY:**
-- ⏳ Anthropic Claude integration (awaiting API key in .env)
+- ⏳ OpenAI integration (awaiting `OPENAI_API_KEY` in `.env`)
 - ⏳ N8N webhook automation (endpoints configured)
 - ⏳ PDF generation via WeasyPrint
 
@@ -31,7 +31,7 @@ This resolved all 401 Unauthorized errors on login validation.
 |---|---|---|---|
 | GitHub | github.com | ALL | Create org, invite team |
 | Neon (database) | neon.tech | Member B | Connection string |
-| Anthropic | console.anthropic.com | Member C | API key |
+| OpenAI | platform.openai.com | Member C | API key |
 | Resend (email) | resend.com | Member C | API key |
 
 ---
@@ -84,9 +84,9 @@ pip install -r requirements.txt
 # 4. Set up environment variables
 cp .env.example .env
 # Open .env and fill in:
-# DATABASE_URL = your Neon connection string
-# SECRET_KEY = any 32+ char random string
-# (Leave AI keys blank for now — Member C adds those)
+# DATABASE_URL   = your Neon connection string
+# SECRET_KEY     = any 32+ char random string
+# OPENAI_API_KEY = your OpenAI key (sk-...)
 
 # 5. Start the backend
 uvicorn main:app --reload --port 8000
@@ -125,7 +125,7 @@ print(pwd.hash('doctor123'))
 Then open http://localhost:8000/docs, find POST /api/auth/login,
 and add doctors via a direct SQL approach.
 
-Alternatively, create a quick setup script:
+Alternatively, create quick setup scripts:
 
 ```bash
 # Create this file: backend/seed_doctors.py
@@ -165,6 +165,9 @@ db.close()
 EOF
 
 python3 seed_doctors.py
+
+# Then seed default availability (Mon–Fri, 9–17) for all doctors
+python3 seed_doctor_availability.py
 ```
 
 ---
@@ -304,7 +307,7 @@ Run through this manually to verify everything works:
 
 ```bash
 # Add to backend/.env
-ANTHROPIC_API_KEY=sk-ant-your-key-here
+OPENAI_API_KEY=sk-your-openai-key-here
 
 # Restart backend
 uvicorn main:app --reload --port 8000
@@ -405,10 +408,10 @@ Fix: Token is missing or expired.
 
 ### AI not responding
 ```
-Error: Claude API error
-Fix: Check ANTHROPIC_API_KEY in backend/.env
-     Make sure it starts with sk-ant-
-     Check you have credits in Anthropic console
+Error: OpenAI API error
+Fix: Check OPENAI_API_KEY in backend/.env
+     Make sure it starts with sk-
+     Check you have credits in OpenAI console
 ```
 
 ### PDF generation fails

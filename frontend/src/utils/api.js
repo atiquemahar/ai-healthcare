@@ -22,9 +22,12 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('token')
-      localStorage.removeItem('role')
-      window.location.href = '/login'
+      const isLoginPage = window.location.pathname.includes('/login')
+      if (!isLoginPage) {
+        localStorage.removeItem('token')
+        localStorage.removeItem('role')
+        window.location.href = '/login'
+      }
     }
     return Promise.reject(error)
   }
@@ -48,10 +51,12 @@ export const patientAPI = {
 
 // ─── Appointments ──────────────────────────────────────────────────────────
 export const appointmentAPI = {
-  getDoctors:    ()       => api.get('/api/doctors'),
-  book:          (data)   => api.post('/api/appointments', data),
-  checkStatus:   (id)     => api.get(`/api/appointments/${id}/status`),
-  cancel:        (id)     => api.put(`/api/appointments/${id}/cancel`),
+  getDoctors:       ()              => api.get('/api/doctors'),
+  book:             (data)          => api.post('/api/appointments', data),
+  checkStatus:      (id)            => api.get(`/api/appointments/${id}/status`),
+  cancel:           (id)            => api.put(`/api/appointments/${id}/cancel`),
+  availableSlots:   (doctorId, d)   =>
+    api.get(`/api/doctors/${doctorId}/available-slots`, { params: { date: d } }),
 }
 
 // ─── Intake / AI Chat ──────────────────────────────────────────────────────
