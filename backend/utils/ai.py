@@ -15,11 +15,13 @@ client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 GPT_MODEL = os.getenv("OPENAI_MODEL", "gpt-4-turbo")
 
 
-def _ensure_client():
-  if client is None:
-    raise RuntimeError(
-      "OpenAI client is not configured. Set OPENAI_API_KEY in backend/.env."
-    )
+def _ensure_client() -> bool:
+  """
+  Returns True if an OpenAI client is configured.
+  If not, we don't raise — we let callers fall back to a friendly message so
+  local demos still work without a real API key.
+  """
+  return client is not None
 
 
 # ─── System Prompt Builder ──────────────────────────────────────────────────────
@@ -132,7 +134,18 @@ def get_ai_response(
   Send patient message to OpenAI and get response.
   conversation_history: list of {role: 'user'|'assistant', content: str}
   """
-  _ensure_client()
+  # If no API key is configured, fall back to a canned response so the
+  # intake flow still works in local demos.
+  if not _ensure_client():
+    if patient_message == "__start__":
+      return (
+        "Hi! I'm your pre‑visit intake assistant. To get ready for your appointment, "
+        "can you tell me in your own words what brings you in today?"
+      )
+    return (
+      "Thanks for sharing that. For this local demo, I'm not connected to the live "
+      "AI service, but your doctor will still review everything you type here."
+    )
 
   # Special handling for the synthetic "__start__" message used by the frontend
   if patient_message == "__start__" and not conversation_history:
@@ -169,7 +182,20 @@ def generate_intake_summary(transcript: str) -> dict:
   After conversation ends, send full transcript to OpenAI.
   Returns structured JSON summary for doctor.
   """
-  _ensure_client()
+  # If no API key, return a minimal, safe summary stub instead of erroring.
+  if not _ensure_client():
+    return {
+      "summary": "AI summary is not available in this local demo, but your intake responses were recorded.",
+      "chief_complaint": "",
+      "symptoms": [],
+      "current_medications": [],
+      "allergies": [],
+      "family_history": "",
+      "medical_history": "",
+      "lifestyle_factors": "",
+      "risk_level": "low",
+      "risk_flags": [],
+    }
 
   prompt = f"""You are a medical data extractor. 
 Read this patient intake conversation and extract the information as JSON.

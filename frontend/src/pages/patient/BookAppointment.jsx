@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useLocation } from 'react-router-dom'
 import { appointmentAPI, intakeAPI } from '../../utils/api'
 import { useAuth } from '../../context/AuthContext'
 
@@ -13,7 +14,12 @@ const STEP = {
 
 export default function BookAppointment() {
   const { user } = useAuth()
-  const [step, setStep]                   = useState(STEP.BOOKING_FORM)
+  const location = useLocation()
+  const initialAppointmentId = location.state?.appointmentId || null
+
+  const [step, setStep]                   = useState(
+    initialAppointmentId ? STEP.CONFIRMING : STEP.BOOKING_FORM
+  )
   const [doctors, setDoctors]             = useState([])
   const [form, setForm]                   = useState({ doctor_id: '', scheduled_date: '', scheduled_time: '', reason: '' })
   const [availableSlots, setAvailableSlots] = useState([])
@@ -25,7 +31,7 @@ export default function BookAppointment() {
   const [messages, setMessages]           = useState([])
   const [inputText, setInputText]         = useState('')
   const [aiTyping, setAiTyping]           = useState(false)
-  const [currentApptId, setCurrentApptId] = useState(null)  // Track current booking
+  const [currentApptId, setCurrentApptId] = useState(initialAppointmentId)  // Track current booking
   const [initRetries, setInitRetries]     = useState(0)    // Retry counter for intake init
   const chatBottomRef = useRef(null)
 
@@ -35,6 +41,38 @@ export default function BookAppointment() {
       .then(res => setDoctors(res.data))
       .catch(() => setError('Failed to load doctors'))
   }, [])
+
+  // If navigating from dashboard with an existing appointment, immediately
+  // start the intake chat for that appointment instead of showing the form.
+  useEffect(() => {
+    if (!initialAppointmentId) return
+
+    const startExistingIntake = async () => {
+      setError('')
+      setStep(STEP.CONFIRMING)
+      try {
+        const res = await appointmentAPI.checkStatus(initialAppointmentId)
+        if (!res.data?.ready) {
+          setError('This appointment is not ready for check-in.')
+          setStep(STEP.BOOKING_FORM)
+          setCurrentApptId(null)
+          return
+        }
+
+        setAppointment(prev => ({ ...prev, ...res.data }))
+        setCurrentApptId(initialAppointmentId)
+
+        // Start chat session for this appointment
+        await initChat(initialAppointmentId)
+      } catch (err) {
+        setError(err.response?.data?.detail || 'Failed to start pre-visit check-in for this appointment.')
+        setStep(STEP.BOOKING_FORM)
+        setCurrentApptId(null)
+      }
+    }
+
+    startExistingIntake()
+  }, [initialAppointmentId])
 
   // Load available slots whenever doctor & date are selected
   useEffect(() => {
@@ -50,11 +88,20 @@ export default function BookAppointment() {
       setSlotsError('')
       try {
         const res = await appointmentAPI.availableSlots(doctor_id, scheduled_date)
-        setAvailableSlots(res.data.slots || [])
-        // If the currently selected time is no longer valid, reset it
-        if (form.scheduled_time && !res.data.slots?.includes(form.scheduled_time)) {
-          setForm(f => ({ ...f, scheduled_time: '' }))
-        }
+        const slots = res.data.slots || []
+        setAvailableSlots(slots)
+
+        setForm(f => {
+          // If the currently selected time is no longer valid, reset it
+          if (f.scheduled_time && !slots.includes(f.scheduled_time)) {
+            return { ...f, scheduled_time: slots[0] || '' }
+          }
+          // Auto-select the first available slot if none selected yet
+          if (!f.scheduled_time && slots.length > 0) {
+            return { ...f, scheduled_time: slots[0] }
+          }
+          return f
+        })
       } catch (err) {
         setAvailableSlots([])
         setSlotsError(err.response?.data?.detail || 'Failed to load available times')
@@ -129,12 +176,6 @@ export default function BookAppointment() {
   // ─── Start chat session ───────────────────────────────────────────────────
 
   const initChat = async (appointmentId) => {
-    // Ignore if this is not the current booking
-    if (currentApptId !== appointmentId) {
-      console.log('Ignoring stale chat init for appointment:', appointmentId)
-      return
-    }
-
     const MAX_RETRIES = 3
     let lastError = null
 
