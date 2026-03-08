@@ -18,7 +18,7 @@ export default function DoctorLogin() {
 
     try {
       const response = await authAPI.login({ email, password })
-      await login(response.data.access_token, response.data.role)
+      await login(response.data, response.data.role)
       navigate('/doctor/dashboard')
     } catch (err) {
       setError(err.response?.data?.detail || 'Login failed')

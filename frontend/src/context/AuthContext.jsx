@@ -7,55 +7,54 @@ export function AuthProvider({ children }) {
   const [user, setUser]       = useState(null)
   const [loading, setLoading] = useState(true)
 
-  // On app load: check if token exists and fetch user info
+  // On app load: restore user from localStorage if token exists
   useEffect(() => {
-    const token = localStorage.getItem('token')
-    if (token) {
-      authAPI.me()
-        .then(res => setUser(res.data))
-        .catch(() => {
-          localStorage.removeItem('token')
-          localStorage.removeItem('role')
-        })
-        .finally(() => setLoading(false))
-    } else {
-      setLoading(false)
+    const token     = localStorage.getItem('token')
+    const savedUser = localStorage.getItem('user')
+
+    if (token && savedUser) {
+      try {
+        setUser(JSON.parse(savedUser))
+      } catch {
+        localStorage.removeItem('token')
+        localStorage.removeItem('role')
+        localStorage.removeItem('user')
+      }
     }
+    setLoading(false)
   }, [])
 
   const login = async (arg1, arg2) => {
-    // Overloaded: either `login(email, password)` which calls the API,
-    // or `login(token, role)` where the token was returned by an API call
     if (arg2 === 'patient' || arg2 === 'doctor') {
-  const token = arg1
-  const role = arg2
-  localStorage.setItem('token', token)
-  localStorage.setItem('role', role)
-  try {
-    const meRes = await authAPI.me()
-    setUser(meRes.data)
-  } catch {
-    // me() failed but token is saved — set minimal user so redirect works
-    setUser({ role, full_name: role === 'doctor' ? 'Doctor' : 'Patient' })
-  }
-  return role
-}
+      const token   = typeof arg1 === 'object' ? arg1.access_token : arg1
+      const role    = arg2
+      const userObj = typeof arg1 === 'object'
+        ? arg1.user
+        : { role, full_name: role === 'doctor' ? 'Doctor' : 'Patient' }
 
-    // Fallback: email/password
-    const email = arg1
-    const password = arg2
-    const res = await authAPI.login({ email, password })
-    localStorage.setItem('token', res.data.access_token)
-    localStorage.setItem('role', res.data.role)
-    const meRes = await authAPI.me()
-    setUser(meRes.data)
-    return res.data.role
+      localStorage.setItem('token', token)
+      localStorage.setItem('role', role)
+      localStorage.setItem('user', JSON.stringify(userObj))
+      setUser(userObj)
+      return role
+    }
+
+    // Legacy: login(email, password)
+    const res = await authAPI.login({ email: arg1, password: arg2 })
+    const { access_token, role, user: userObj } = res.data
+
+    localStorage.setItem('token', access_token)
+    localStorage.setItem('role', role)
+    localStorage.setItem('user', JSON.stringify(userObj))
+    setUser(userObj)
+    return role
   }
 
   const logout = () => {
     authAPI.logout().catch(() => {})
     localStorage.removeItem('token')
     localStorage.removeItem('role')
+    localStorage.removeItem('user')
     setUser(null)
   }
 

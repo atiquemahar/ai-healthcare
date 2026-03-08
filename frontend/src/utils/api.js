@@ -18,6 +18,7 @@ api.interceptors.request.use((config) => {
 })
 
 // If token expired (401), clear auth and redirect to login
+// But don't redirect if already on a login page (prevents infinite loop)
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -43,36 +44,35 @@ export const authAPI = {
 
 // ─── Patient ───────────────────────────────────────────────────────────────
 export const patientAPI = {
-  dashboard:           ()     => api.get('/api/patients/me/dashboard'),
-  appointments:        ()     => api.get('/api/patients/me/appointments'),
-  prescriptions:       ()     => api.get('/api/patients/me/prescriptions'),
-  prescription:        (id)   => api.get(`/api/patients/me/prescriptions/${id}`),
+  dashboard:     ()   => api.get('/api/patients/me/dashboard'),
+  appointments:  ()   => api.get('/api/patients/me/appointments'),
+  prescriptions: ()   => api.get('/api/patients/me/prescriptions'),
+  prescription:  (id) => api.get(`/api/patients/me/prescriptions/${id}`),
 }
 
 // ─── Appointments ──────────────────────────────────────────────────────────
 export const appointmentAPI = {
-  getDoctors:       ()              => api.get('/api/doctors'),
-  book:             (data)          => api.post('/api/appointments', data),
-  checkStatus:      (id)            => api.get(`/api/appointments/${id}/status`),
-  cancel:           (id)            => api.put(`/api/appointments/${id}/cancel`),
-  availableSlots:   (doctorId, d)   =>
-    api.get(`/api/doctors/${doctorId}/available-slots`, { params: { date: d } }),
+  getDoctors:     ()                    => api.get('/api/doctors'),
+  availableSlots: (doctorId, date)      => api.get(`/api/doctors/${doctorId}/available-slots`, { params: { date } }),
+  book:           (data)                => api.post('/api/appointments', data),
+  checkStatus:    (id)                  => api.get(`/api/appointments/${id}/status`),
+  cancel:         (id)                  => api.put(`/api/appointments/${id}/cancel`),
 }
 
 // ─── Intake / AI Chat ──────────────────────────────────────────────────────
 export const intakeAPI = {
-  startSession:  (data)   => api.post('/api/intake/sessions', data),
-  getContext:    (id)     => api.get(`/api/intake/sessions/${id}/context`),
-  sendMessage:   (id, msg) => api.post(`/api/intake/sessions/${id}/messages`, { content: msg }),
-  complete:      (id)     => api.post(`/api/intake/sessions/${id}/complete`),
+  startSession:  (data)        => api.post('/api/intake/sessions', data),
+  getContext:    (id)          => api.get(`/api/intake/sessions/${id}/context`),
+  sendMessage:   (id, msg)     => api.post(`/api/intake/sessions/${id}/messages`, { content: msg }),
+  complete:      (id)          => api.post(`/api/intake/sessions/${id}/complete`),
 }
 
 // ─── Doctor ────────────────────────────────────────────────────────────────
 export const doctorAPI = {
-  dashboard:        (date)  => api.get('/api/doctor/dashboard', { params: { target_date: date } }),
-  patientHistory:   (id)    => api.get(`/api/doctor/patients/${id}/history`),
-  startEncounter:   (apptId) => api.post('/api/doctor/encounters', null, { params: { appointment_id: apptId } }),
-  completeEncounter:(id, data) => api.post(`/api/doctor/encounters/${id}/complete`, data),
+  dashboard:         (date)          => api.get('/api/doctor/dashboard', { params: { target_date: date } }),
+  patientHistory:    (id)            => api.get(`/api/doctor/patients/${id}/history`),
+  startEncounter:    (apptId)        => api.post('/api/doctor/encounters', null, { params: { appointment_id: apptId } }),
+  completeEncounter: (id, data)      => api.post(`/api/doctor/encounters/${id}/complete`, data),
 }
 
 export default api

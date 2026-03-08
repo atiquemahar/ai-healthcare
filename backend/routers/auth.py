@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt as _bcrypt
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import os
@@ -15,8 +15,6 @@ load_dotenv()
 
 router = APIRouter()
 
-# ─── Security setup ───────────────────────────────────────────────────────────
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 SECRET_KEY = os.getenv("SECRET_KEY", "change-this-secret")
@@ -24,13 +22,14 @@ ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 1440))
 
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
-
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return _bcrypt.hashpw(password.encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    try:
+        return _bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
 
 def create_token(data: dict) -> str:
     payload = data.copy()
@@ -39,7 +38,6 @@ def create_token(data: dict) -> str:
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    """Decode JWT and return the current user (patient or doctor)."""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired token",
@@ -47,11 +45,12 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: int = payload.get("sub")
+        user_id = payload.get("sub")
         role: str = payload.get("role")
         if user_id is None or role is None:
             raise credentials_exception
-    except JWTError:
+        user_id = int(user_id)
+    except (JWTError, ValueError):
         raise credentials_exception
 
     if role == "patient":
@@ -64,7 +63,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     if user is None or not user.is_active:
         raise credentials_exception
 
-    user.role = role  # attach role to object for downstream use
+    user.role = role
     return user
 
 def require_patient(current_user=Depends(get_current_user)):
@@ -78,11 +77,8 @@ def require_doctor(current_user=Depends(get_current_user)):
     return current_user
 
 
-# ─── Endpoints ────────────────────────────────────────────────────────────────
-
-@router.post("/register", response_model=TokenResponse)
+@router.post("/register")
 def register_patient(data: PatientRegister, db: Session = Depends(get_db)):
-    """Register a new patient account."""
     existing = db.query(Patient).filter(Patient.email == data.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -100,19 +96,25 @@ def register_patient(data: PatientRegister, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(patient)
 
-    token = create_token({"sub": patient.id, "role": "patient"})
-    return TokenResponse(access_token=token, role="patient")
+    token = create_token({"sub": str(patient.id), "role": "patient"})
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "role": "patient",
+        "user": {
+            "id": patient.id,
+            "email": patient.email,
+            "full_name": patient.full_name,
+            "role": "patient",
+        }
+    }
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login")
 def login(data: LoginRequest, db: Session = Depends(get_db)):
-    """Login for patients and doctors. Returns JWT token + role."""
-
-    # Try patient first
     user = db.query(Patient).filter(Patient.email == data.email).first()
     role = "patient"
 
-    # Try doctor if not found as patient
     if not user:
         user = db.query(Doctor).filter(Doctor.email == data.email).first()
         role = "doctor"
@@ -123,19 +125,31 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Account is inactive")
 
-    token = create_token({"sub": user.id, "role": role})
-    return TokenResponse(access_token=token, role=role)
+    # Store sub as string to avoid JWT type issues
+    token = create_token({"sub": str(user.id), "role": role})
+
+    # Return user info alongside token — frontend uses this directly
+    # so it never needs to call /me just to get basic user info
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "role": role,
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "full_name": user.full_name,
+            "role": role,
+        }
+    }
 
 
 @router.post("/logout")
 def logout():
-    """Client should delete the token. Server is stateless."""
     return {"message": "Logged out successfully"}
 
 
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user=Depends(get_current_user)):
-    """Return current logged-in user info."""
     return UserResponse(
         id=current_user.id,
         email=current_user.email,

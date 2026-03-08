@@ -19,7 +19,7 @@ export default function PatientLogin() {
     try {
       const response = await authAPI.login({ email, password })
       // set auth state using token + role
-      await login(response.data.access_token, response.data.role)
+      await login(response.data, response.data.role)
       // navigate based on role
       if (response.data.role === 'doctor') {
         navigate('/doctor/dashboard')
@@ -80,12 +80,6 @@ export default function PatientLogin() {
           Don't have an account?{' '}
           <a href="/register" className="text-blue-600 hover:underline">
             Register here
-          </a>
-        </p>
-        <p className="mt-2 text-center text-sm text-gray-400">
-          Are you a doctor?{' '}
-          <a href="/doctor/login" className="text-purple-600 hover:underline">
-          Doctor login →
           </a>
         </p>
       </div>
